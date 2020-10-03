@@ -13,5 +13,6 @@ Environment variables:
     * `POSTGRES_USER`
     * `POSTGRES_PASSWORD`
     * `POSTGRES_DB`
+* `HOME_LOCATION_ID` -- Defaults to 1
 * `FIXED_COSTS` -- other fixed per-kWh costs to add in
 * `TZ` -- `America/Chiago` by default

@@ -7,4 +7,5 @@ RUN pip install -r requirements.txt
 
 COPY . .
 
+HEALTHCHECK CMD python /code/health.py
 CMD [ "python", "main.py" ]

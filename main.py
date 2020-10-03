@@ -25,6 +25,12 @@ if FIXED_COSTS is None:
 else:
     FIXED_COSTS = float(FIXED_COSTS)
 
+HOME_LOCATION_ID = os.environ.get("HOME_LOCATION_ID")
+if HOME_LOCATION_ID is None:
+    HOME_LOCATION_ID = 1
+else:
+    HOME_LOCATION_ID = int(HOME_LOCATION_ID)
+
 TZ = os.environ.get("TZ", "America/Chicago")
 
 
@@ -94,25 +100,26 @@ def interpolate_points(prices, charge_data):
 
 logging.basicConfig(level=logging.WARN)
 
-Base = automap_base()
-
-engine = create_engine(f"postgresql+psycopg2://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}/{POSTGRES_DB}", echo=False)
-
-Base.prepare(engine, reflect=True)
-
-Charges = Base.classes.charges
-ChargingProcesses = Base.classes.charging_processes
-
-session = Session(engine)
-
-comed_time = pytz.timezone(TZ)
 
 try:
     while True:
+        Base = automap_base()
+
+        engine = create_engine(f"postgresql+psycopg2://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}/{POSTGRES_DB}", echo=False)
+
+        Base.prepare(engine, reflect=True)
+
+        Charges = Base.classes.charges
+        ChargingProcesses = Base.classes.charging_processes
+
+        session = Session(engine)
+
+        comed_time = pytz.timezone(TZ)
+
         one_hour_ago = datetime.datetime.now() - datetime.timedelta(hours=1)
         processes = session.query(ChargingProcesses).filter(
             ChargingProcesses.end_date != None,
-            ChargingProcesses.geofence_id == 1,
+            ChargingProcesses.geofence_id == HOME_LOCATION_ID,
             ChargingProcesses.end_date < one_hour_ago,
             ChargingProcesses.cost == 0
         )
@@ -171,7 +178,13 @@ try:
         print(session.dirty)
         session.commit()
 
+        with open("/tmp/teslamate-comed-last-update", "w") as f:
+            now = datetime.datetime.utcnow()
+            f.write(now.isoformat())
+
         time.sleep(datetime.timedelta(hours=1).total_seconds())
 
 except KeyboardInterrupt:
     print("Exiting due to KeyboardInterrupt")
+except:
+    logging.exception("Unknown exception during execution")
