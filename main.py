@@ -121,7 +121,7 @@ try:
             ChargingProcesses.end_date != None,
             ChargingProcesses.geofence_id == HOME_LOCATION_ID,
             ChargingProcesses.end_date < one_hour_ago,
-            ChargingProcesses.cost == 0
+            ChargingProcesses.cost == None
         )
 
         for first_process in processes:
