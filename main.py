@@ -34,6 +34,12 @@ else:
 TZ = os.environ.get("TZ", "America/Chicago")
 
 
+logging.basicConfig(level=logging.INFO)
+
+
+logger = logging.getLogger(__name__)
+
+
 @dataclass
 class ChargeDataPoint:
     date: datetime.datetime
@@ -98,9 +104,6 @@ def interpolate_points(prices, charge_data):
     return result
 
 
-logging.basicConfig(level=logging.WARN)
-
-
 try:
     while True:
         Base = automap_base()
@@ -125,57 +128,61 @@ try:
         )
 
         for first_process in processes:
-            # Then, look in Charges for all details between start date and end date
-            charge_data = session.query(Charges).filter(Charges.date >= first_process.start_date, Charges.date <= first_process.end_date).all()
+            try:
+                logger.info("Processing charge session: %s - %s", first_process.start_date, first_process.end_date)
+                # Then, look in Charges for all details between start date and end date
+                charge_data = session.query(Charges).filter(Charges.date >= first_process.start_date, Charges.date <= first_process.end_date).all()
 
-            comed_data_start = first_process.start_date - datetime.timedelta(minutes=5)
-            comed_data_end = first_process.end_date + datetime.timedelta(minutes=5)
+                comed_data_start = first_process.start_date - datetime.timedelta(minutes=5)
+                comed_data_end = first_process.end_date + datetime.timedelta(minutes=5)
 
-            comed_url = "https://hourlypricing.comed.com/api?type=5minutefeed&datestart={0:%Y%m%d%H%M}&dateend={1:%Y%m%d%H%M}".format(
-                comed_data_start.astimezone(comed_time),
-                comed_data_end.astimezone(comed_time)
-            )
-            comed_data = requests.get(comed_url).json()
+                comed_url = "https://hourlypricing.comed.com/api?type=5minutefeed&datestart={0:%Y%m%d%H%M}&dateend={1:%Y%m%d%H%M}".format(
+                    comed_data_start.astimezone(comed_time),
+                    comed_data_end.astimezone(comed_time)
+                )
+                logger.info("Fetching %s", comed_url)
+                comed_data = requests.get(comed_url).json()
 
-            comed_data.sort(key=lambda x: int(x['millisUTC']))
+                comed_data.sort(key=lambda x: int(x['millisUTC']))
 
-            prices = [ { "date": datetime.datetime.fromtimestamp(float(x['millisUTC']) / 1000), "price": float(x['price']) / 100 } for x in comed_data ]
+                prices = [ { "date": datetime.datetime.fromtimestamp(float(x['millisUTC']) / 1000), "price": float(x['price']) / 100 } for x in comed_data ]
 
-            total_price = 0
-            total_power = 0
+                total_price = 0
+                total_power = 0
 
-            points = interpolate_points(prices, charge_data)
-            point_index = 1
-            for point_l, point_r in zip(points, points[1:]):
-                cost_l = point_l.get_price_per_hour()
-                cost_r = point_r.get_price_per_hour()
+                points = interpolate_points(prices, charge_data)
+                point_index = 1
+                for point_l, point_r in zip(points, points[1:]):
+                    cost_l = point_l.get_price_per_hour()
+                    cost_r = point_r.get_price_per_hour()
 
-                power_l = point_l.get_power_kW()
-                power_r = point_r.get_power_kW()
+                    power_l = point_l.get_power_kW()
+                    power_r = point_r.get_power_kW()
 
-                time_delta_hours = (point_r.date - point_l.date) / datetime.timedelta(hours=1)
+                    time_delta_hours = (point_r.date - point_l.date) / datetime.timedelta(hours=1)
 
-                slice_cost = ((cost_l + cost_r) / 2) * time_delta_hours
-                total_price += slice_cost
+                    slice_cost = ((cost_l + cost_r) / 2) * time_delta_hours
+                    total_price += slice_cost
 
-                slice_power = ((power_l + power_r) / 2) * time_delta_hours
-                total_power += slice_power
+                    slice_power = ((power_l + power_r) / 2) * time_delta_hours
+                    total_power += slice_power
 
-            total_price += FIXED_COSTS * total_power
+                total_price += FIXED_COSTS * total_power
 
-            print(f"ID: {first_process.id}")
-            print(f"Total price: {total_price}")
-            print(f"Total power: {total_power} kWh")
-            print(f"Average price per kWh: {sum([float(x['price']) / 100 for x in comed_data]) / len(comed_data)}")
-            print(f"Average price per kWh including fixed costs: {total_price / total_power}")
-            print(f"Min: {min(float(x['price']) for x in comed_data)}, Max: {max(float(x['price']) for x in comed_data)}")
-            print(comed_url)
-            print("------")
-            print("")
+                logger.info("ID: %d", first_process.id)
+                logger.info("Total price: %f", total_price)
+                logger.info("Total power: %f kWh", total_power)
+                logger.info("Average price per kWh: %f", sum([float(x['price']) / 100 for x in comed_data]) / len(comed_data))
+                logger.info("Average price per kWh including fixed costs: %f", total_price / total_power)
+                logger.info("Min: %f, Max: %f", min(float(x['price']) for x in comed_data), max(float(x['price']) for x in comed_data))
+                logger.info("%s", comed_url)
+                logger.info("------")
 
-            first_process.cost = total_price
+                first_process.cost = total_price
+            except:
+                logger.exception("Error processing comed data, will try again next time")
 
-        print(session.dirty)
+        logger.info("Session dirty? %r", session.dirty)
         session.commit()
 
         with open("/tmp/teslamate-comed-last-update", "w") as f:
@@ -185,6 +192,6 @@ try:
         time.sleep(datetime.timedelta(hours=1).total_seconds())
 
 except KeyboardInterrupt:
-    print("Exiting due to KeyboardInterrupt")
+    logger.warning("Exiting due to KeyboardInterrupt")
 except:
-    logging.exception("Unknown exception during execution")
+    logger.exception("Unknown exception during execution")
